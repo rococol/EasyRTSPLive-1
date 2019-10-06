@@ -1,103 +1,21 @@
-
-#include <string.h>  
-  
-#ifdef _WIN32  
-#include <Windows.h>  
-#include <stdio.h>  
-#else  
-  
-#include <unistd.h>  
-#include <fcntl.h>  
-#include <stdio.h>  
-#include <stdlib.h>  
-#include <stdarg.h>  
-#endif 
+#define _CRT_SECURE_NO_WARNINGS
+#define CONF_FILE_PATH  "easyrtsplive.ini"
+#define CONF_KEY_RTSP_CONNECT "rtsp_connect"
+#define CONF_KEY_RTSP_MESSAGE "rtsp_message"
+#define CONF_KEY_RTMP_CONNECT "rtmp_connect"
+#define CONF_KEY_RTMP_MESSAGE "rtmp_message"
 
 #include "ini.h"
-
-/*
-下边是配置文件：
-[CAT]
-age=2
-name=Tom
-*/
 
 //从INI文件读取字符串类型数据  
 char *GetIniKeyString(char *title,char *key,char *filename)   
 {   
-    FILE *fp;   
-    char szLine[1024];  
-    static char tmpstr[1024];  
-    int rtnval;  
-    int i = 0;   
-    int flag = 0;   
-    char *tmp;  
-  
-    if((fp = fopen(filename, "r")) == NULL)   
-    {   
-        printf("have   no   such   file \n");  
-        return "";   
-    }  
-    while(!feof(fp))   
-    {   
-        rtnval = fgetc(fp);   
-        if(rtnval == EOF)   
-        {   
-            break;   
-        }   
-        else   
-        {   
-            szLine[i++] = rtnval;   
-        }   
-        if(rtnval == '\n' || rtnval == '\r')   
-        {   
-#ifndef WIN32  
-            //i--;  
-#endif    
-            szLine[--i] = '\0';  
-            i = 0;   
-            tmp = strchr(szLine, '=');   
-  
-            if(( tmp != NULL )&&(flag == 1))   
-            {   
-                if(strstr(szLine,key)!=NULL)   
-                {   
-                    //注释行  
-                    if ('#' == szLine[0])  
-                    {  
-                    }  
-                    else if ( '\/' == szLine[0] && '\/' == szLine[1] )  
-                    {  
-                          
-                    }  
-                    else  
-                    {  
-                        //找打key对应变量  
-                        strcpy(tmpstr,tmp+1);   
-                        fclose(fp);  
-
-						while(tmpstr[strlen(tmpstr) - 1] == ' ' || tmpstr[strlen(tmpstr) - 1] == '\t')
-							tmpstr[strlen(tmpstr) - 1] = '\0';
-
-                        return tmpstr;   
-                    }  
-                }   
-            }  
-            else   
-            {   
-                strcpy(tmpstr,"[");   
-                strcat(tmpstr,title);   
-                strcat(tmpstr,"]");  
-                if( strncmp(tmpstr,szLine,strlen(tmpstr)) == 0 )   
-                {  
-                    //找到title  
-                    flag = 1;   
-                }  
-            }  
-        }  
-    }  
-    fclose(fp);   
-    return "";   
+	CSimpleIniA ini;
+	ini.LoadFile(filename);
+	const char *value = ini.GetValue(title, key, "");
+	char *val = new char[strlen(value) + 1];
+	strcpy(val, value);
+	return val;
 }  
   
 //从INI文件读取整类型数据  
@@ -115,4 +33,26 @@ int GetIniKeyInt(char *title,char *key,char *filename)
 	}
 
     return ret;  
-}  
+} 
+
+//从INI文件写入字符串类型数据 
+void WriteIniKeyString(const char* title, const char* key, char* val, const char* filename)
+{
+	CSimpleIniA ini;
+	ini.LoadFile(filename);
+	ini.SetValue(title, key, val);
+	ini.SaveFile(filename);
+}
+
+void WriteChannelRtspConnect(char *channelName, char *connect, char *message)
+{
+	WriteIniKeyString(channelName, "rtsp_connect", connect, CONF_FILE_PATH);
+	WriteIniKeyString(channelName, "rtsp_message", message, CONF_FILE_PATH);
+}
+
+void WriteChannelRtmpConnect(char *channelName, char *connect, char *message)
+{
+	WriteIniKeyString(channelName, "rtmp_connect", connect, CONF_FILE_PATH);
+	WriteIniKeyString(channelName, "rtmp_message", message, CONF_FILE_PATH);
+}
+
