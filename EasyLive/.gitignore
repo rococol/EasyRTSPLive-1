@@ -1,0 +1,15 @@
+*/Debug/*
+*/Release/*
+*.log
+*.sdf
+*.opensdf
+*.pdb
+*.ipch
+*.ilk
+/Debug/*
+/Release/*
+*.tlog
+/RTMPLive/x64/Debug/*
+/RTMPLive/build/*
+/EasyRTSPLive/x64/*
+*.suo
