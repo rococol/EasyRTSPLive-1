@@ -19,14 +19,12 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ConvertUTF.c" />
     <ClCompile Include="getopt.c" />
     <ClCompile Include="ini.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="trace.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ConvertUTF.h" />
     <ClInclude Include="getopt.h" />
     <ClInclude Include="ini.h" />
     <ClInclude Include="trace.h" />

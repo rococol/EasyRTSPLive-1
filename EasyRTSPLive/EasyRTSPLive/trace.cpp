@@ -77,3 +77,94 @@ void TRACE_LOG(FILE* fLog, const char *szFormat, ...)
 		fflush(fLog);
 	}
 }
+
+//创建通道结构
+_channel_info* CreateChannel(int channelId, char *rtsp, char *rtmp, int option, int verbosity)
+{
+	_channel_info* pChannelInfo = new _channel_info();
+	if (pChannelInfo)
+	{
+		memset(pChannelInfo, 0, sizeof(_channel_info));
+		pChannelInfo->fCfgInfo.channelId = channelId;
+		pChannelInfo->fHavePrintKeyInfo = false;
+		sprintf(pChannelInfo->fCfgInfo.channelName, "channel%d", channelId);
+		strcpy(pChannelInfo->fCfgInfo.srcRtspAddr, rtsp);
+		strcpy(pChannelInfo->fCfgInfo.destRtmpAddr, rtmp);
+		pChannelInfo->fCfgInfo.option = option;
+		pChannelInfo->verbosity = verbosity;
+		if (strlen(pChannelInfo->fCfgInfo.srcRtspAddr) > 0 && strlen(pChannelInfo->fCfgInfo.destRtmpAddr) > 0)
+		{
+			return pChannelInfo;
+		}
+		else
+		{
+			return NULL;
+		}
+	}
+	else
+	{
+		return NULL;
+	}
+}
+
+//关闭通道rtsp
+void StopChannelRtsp(_channel_info* pChannel)
+{
+	if (NULL != pChannel->fNVSHandle)
+	{
+		//rtsp close
+		EasyRTSP_CloseStream(pChannel->fNVSHandle);
+		//rtsp deinit
+		EasyRTSP_Deinit(&(pChannel->fNVSHandle));
+		pChannel->fNVSHandle = NULL;
+	}
+}
+
+bool StartChannelRtsp(_channel_info* pChannelInfo, RTSPSourceCallBack _callback)
+{
+	if (NULL == pChannelInfo)
+	{
+		return false;
+	}
+	//stop rtsp
+	StopChannelRtsp(pChannelInfo);
+	//init rtsp
+	EasyRTSP_Init(&(pChannelInfo->fNVSHandle));
+	if (NULL == pChannelInfo->fNVSHandle)
+	{
+		return false;
+	}
+	unsigned int mediaType = EASY_SDK_VIDEO_FRAME_FLAG | EASY_SDK_AUDIO_FRAME_FLAG;
+
+	//rtsp callback
+	EasyRTSP_SetCallback(pChannelInfo->fNVSHandle, _callback);
+
+	//rtsp open
+	EasyRTSP_OpenStream(pChannelInfo->fNVSHandle, pChannelInfo->fCfgInfo.channelId, pChannelInfo->fCfgInfo.srcRtspAddr, EASY_RTP_OVER_TCP, mediaType, 0, 0, pChannelInfo, 1000, 0, pChannelInfo->fCfgInfo.option, pChannelInfo->verbosity);
+
+	return true;
+}
+
+//关闭通道推流
+void StopChannelPusher(_channel_info* pChannel)
+{
+	if (NULL != pChannel->fPusherInfo.rtmpHandle)
+	{
+		//rtmp release
+		EasyRTMP_Release(pChannel->fPusherInfo.rtmpHandle);
+		pChannel->fPusherInfo.rtmpHandle = NULL;
+	}
+
+	if (pChannel->fPusherInfo.aacEncHandle)
+	{
+		//aac release
+		Easy_AACEncoder_Release(pChannel->fPusherInfo.aacEncHandle);
+		pChannel->fPusherInfo.aacEncHandle = NULL;
+	}
+
+	if (pChannel->fPusherInfo.pAACCacheBuffer)
+	{
+		delete[] pChannel->fPusherInfo.pAACCacheBuffer;
+		pChannel->fPusherInfo.pAACCacheBuffer = NULL;
+	}
+}

@@ -1,7 +1,11 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EasyRTSPLive", "EasyRTSPLive\EasyRTSPLive.vcxproj", "{46A7FA69-397C-4336-B08F-9E9FA2931867}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "EasyLive", "..\EasyLive\EasyLive\EasyLive.vcxproj", "{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -19,6 +23,14 @@ Global
 		{46A7FA69-397C-4336-B08F-9E9FA2931867}.Release|Win32.Build.0 = Release|Win32
 		{46A7FA69-397C-4336-B08F-9E9FA2931867}.Release|x64.ActiveCfg = Release|x64
 		{46A7FA69-397C-4336-B08F-9E9FA2931867}.Release|x64.Build.0 = Release|x64
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Debug|Win32.ActiveCfg = Debug|Win32
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Debug|Win32.Build.0 = Debug|Win32
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Debug|x64.ActiveCfg = Debug|x64
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Debug|x64.Build.0 = Debug|x64
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Release|Win32.ActiveCfg = Release|Win32
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Release|Win32.Build.0 = Release|Win32
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Release|x64.ActiveCfg = Release|x64
+		{CDECF2B9-2DB8-447E-A1D2-00CD93DC5377}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -11,6 +11,7 @@
 char *GetIniKeyString(char *title,char *key,char *filename)   
 {   
 	CSimpleIniA ini;
+	ini.SetUnicode();
 	ini.LoadFile(filename);
 	const char *value = ini.GetValue(title, key, "");
 	char *val = new char[strlen(value) + 1];
@@ -39,20 +40,37 @@ int GetIniKeyInt(char *title,char *key,char *filename)
 void WriteIniKeyString(const char* title, const char* key, char* val, const char* filename)
 {
 	CSimpleIniA ini;
+	ini.SetUnicode();
 	ini.LoadFile(filename);
-	ini.SetValue(title, key, val);
-	ini.SaveFile(filename);
+	if (ini.SetValue(title, key, val) < 0)
+	{
+		return;
+	}
+	if (ini.SaveFile(filename) < 0)
+	{
+		return;
+	}
 }
 
+//rtsp连接
 void WriteChannelRtspConnect(char *channelName, char *connect, char *message)
 {
-	WriteIniKeyString(channelName, "rtsp_connect", connect, CONF_FILE_PATH);
-	WriteIniKeyString(channelName, "rtsp_message", message, CONF_FILE_PATH);
+	printf("rtsp->channelName:%s,connect:%s,message:%s\n", channelName, connect, message);
+	char filename[512] = {};
+	strcat(filename, channelName);
+	strcat(filename, ".ini");
+	WriteIniKeyString(channelName, "rtsp_connect", connect, filename);
+	WriteIniKeyString(channelName, "rtsp_message", message, filename);
 }
 
+//rtmp连接
 void WriteChannelRtmpConnect(char *channelName, char *connect, char *message)
 {
-	WriteIniKeyString(channelName, "rtmp_connect", connect, CONF_FILE_PATH);
-	WriteIniKeyString(channelName, "rtmp_message", message, CONF_FILE_PATH);
+	printf("rtmp->channelName:%s,connect:%s,message:%s\n", channelName, connect, message);
+	char filename[512] = {};
+	strcat(filename, channelName);
+	strcat(filename, ".ini");
+	WriteIniKeyString(channelName, "rtmp_connect", connect, filename);
+	WriteIniKeyString(channelName, "rtmp_message", message, filename);
 }
 

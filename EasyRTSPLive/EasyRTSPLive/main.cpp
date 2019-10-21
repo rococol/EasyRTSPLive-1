@@ -49,72 +49,57 @@
 #define CONF_KEY_RTMP "rtmp"
 //#define TRACE_LOG
 
-typedef struct _channel_cfg_struct_t
-{
-	int channelId;
-	int option;
-	char channelName[64];
-	char srcRtspAddr[512];
-	char destRtmpAddr[512];
-}_channel_cfg;
+static bool rtspActivate;
 
-typedef struct _rtmp_pusher_struct_t
-{
-	Easy_Handle aacEncHandle;
-	Easy_Handle rtmpHandle;
-	unsigned int u32AudioCodec;	
-	unsigned int u32AudioSamplerate;
-	unsigned int u32AudioChannel;
-	unsigned char* pAACCacheBuffer;
-}_rtmp_pusher;
-
-typedef struct _channel_info_struct_t
-{
-	_channel_cfg		fCfgInfo;
-	_rtmp_pusher		fPusherInfo;
-	Easy_Handle	fNVSHandle;
-	FILE*				fLogHandle;
-	bool				fHavePrintKeyInfo;
-	EASY_MEDIA_INFO_T	fMediainfo;
-}_channel_info;
+static bool rtmpActivate;
 
 static std::list <_channel_info*> gChannelInfoList;
 
-//rtmp callback
+//Stop
+void StopChannel(_channel_info* pChannel)
+{
+	StopChannelRtsp(pChannel);
+
+	StopChannelPusher(pChannel);
+}
+
+//rtmp回调
 int __EasyRTMP_Callback(int _frameType, char *pBuf, EASY_RTMP_STATE_T _state, void *_userPtr)
 {
 	_channel_info* pChannel = (_channel_info*)_userPtr;
 	switch(_state)
 	{
 		case EASY_RTMP_STATE_CONNECTING:
-			WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "0", "connecting");
-#ifdef TRACE_LOG
-			//TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][connecting]%s\n", pChannel->fCfgInfo.destRtmpAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(2, 0, "connecting");
+			}
 			break;
 		case EASY_RTMP_STATE_CONNECTED:
-			WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "1", "connected");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][connected]%s\n", pChannel->fCfgInfo.destRtmpAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(2, 1, "connected");
+			}
 			break;
 		case EASY_RTMP_STATE_CONNECT_FAILED:
-			WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "connect failed");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][connect_failed]%s\n", pChannel->fCfgInfo.destRtmpAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(2, 2, "connect failed");
+			}
 			break;
 		case EASY_RTMP_STATE_CONNECT_ABORT:
-			WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "connect abort");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][connect_abort]%s\n", pChannel->fCfgInfo.destRtmpAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(2, 2, "connect abort");
+			}
+			StopChannel(pChannel);
 			break;
 		case EASY_RTMP_STATE_DISCONNECTED:
-			WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "disconnect");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][disconnect]%s\n", pChannel->fCfgInfo.destRtmpAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(2, 2, "disconnect");
+			}
+			StopChannel(pChannel);
 			break;
 		default:
 			break;
@@ -152,18 +137,20 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 		{
 			if(frameinfo->type == EASY_SDK_VIDEO_FRAME_I)
 			{
-				WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "1", "I Frame");
+				if (NULL != pChannel->liveCallback)
+				{
+					pChannel->liveCallback(1, 1, "Recevied I Frame");
+				}
 				if(pChannel->fPusherInfo.rtmpHandle == 0)
 				{
 					//rtmp create
 					pChannel->fPusherInfo.rtmpHandle = EasyRTMP_Create();
 					if (pChannel->fPusherInfo.rtmpHandle == NULL)
 					{
-						WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to rtmp create failed ...");
-						//printf("[rtmp][create][failed]Fail to rtmp create failed ...\n");
-#ifdef TRACE_LOG
-						TRACE_LOG(pChannel->fLogHandle, "[rtmp][create][failed]Fail to rtmp create failed ...\n");
-#endif
+						if (NULL != pChannel->liveCallback)
+						{
+							pChannel->liveCallback(2, 2, "Fail to rtmp create failed ...");
+						}
 						return -1;
 					}
 					//rtmp callback
@@ -171,27 +158,31 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 					bRet = EasyRTMP_Connect(pChannel->fPusherInfo.rtmpHandle, pChannel->fCfgInfo.destRtmpAddr);
 					if (!bRet)
 					{
-						WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to rtmp connect failed ");
-						//printf("[rtmp][connect][failed]Fail to rtmp connect failed ...\n");
-#ifdef TRACE_LOG
-						TRACE_LOG(pChannel->fLogHandle, "[rtmp][connect][failed]Fail to rtmp connect failed ...\n");
-#endif
+						if (NULL != pChannel->liveCallback)
+						{
+							pChannel->liveCallback(2, 2, "Fail to rtmp connect failed ");
+						}
 					}
 					EASY_MEDIA_INFO_T mediaInfo;
 					memset(&mediaInfo, 0, sizeof(EASY_MEDIA_INFO_T));
-					mediaInfo.u32VideoFps = pChannel->fMediainfo.u32VideoFps;
-					mediaInfo.u32AudioSamplerate =pChannel->fMediainfo.u32AudioSamplerate ;				/* 音频采样率 */
+					//mediaInfo.u32VideoCodec = pChannel->fMediainfo.u32VideoCodec;
+					mediaInfo.u32VideoFps = pChannel->fMediainfo.u32VideoFps == 0 ? 25 : pChannel->fMediainfo.u32VideoFps;
+					//mediaInfo.u32AudioCodec = pChannel->fMediainfo.u32AudioCodec;
+					mediaInfo.u32AudioSamplerate = pChannel->fMediainfo.u32AudioSamplerate ;				/* 音频采样率 */
 					mediaInfo.u32AudioChannel = pChannel->fMediainfo.u32AudioChannel;					/* 音频通道数 */
 					mediaInfo.u32AudioBitsPerSample = pChannel->fMediainfo.u32AudioBitsPerSample;		/* 音频采样精度 */
-					//rtmp 
+					//mediaInfo.u32VpsLength = pChannel->fMediainfo.u32VpsLength;
+					//mediaInfo.u32SpsLength = pChannel->fMediainfo.u32SpsLength;
+					//mediaInfo.u32PpsLength = pChannel->fMediainfo.u32PpsLength;
+					//mediaInfo.u32SeiLength = pChannel->fMediainfo.u32SeiLength;
+																										//rtmp 
 					iRet = EasyRTMP_InitMetadata(pChannel->fPusherInfo.rtmpHandle, &mediaInfo, 1024);
 					if (iRet < 0)
 					{
-						WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to Init Metadata ...");
-						//printf("[rtmp][init metadata][failed]Fail to Init Metadata ...\n");
-#ifdef TRACE_LOG
-						TRACE_LOG(pChannel->fLogHandle, "[rtmp][init metadata][failed]Fail to Init Metadata ...\n");
-#endif
+						if (NULL != pChannel->liveCallback)
+						{
+							pChannel->liveCallback(2, 2, "Fail to Init Metadata ...");
+						}
 					}
 				}
 
@@ -207,19 +198,15 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 				iRet = EasyRTMP_SendPacket(pChannel->fPusherInfo.rtmpHandle, &avFrame);
 				if (iRet < 0)
 				{
-					WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to Send H264 Packet(I-frame) ...");
-					//printf("[rtmp][send][failed]Fail to Send H264 Packet(I-frame) ...\n");
-#ifdef TRACE_LOG
-					TRACE_LOG(pChannel->fLogHandle, "[rtmp][send][failed]Fail to Send H264 Packet(I-frame) ...\n");
-#endif
+					if (NULL != pChannel->liveCallback)
+					{
+						pChannel->liveCallback(2, 2, "Fail to Send H264 Packet(I-frame) ...");
+					}
 				}
 				else
 				{
 					if(!pChannel->fHavePrintKeyInfo)
 					{
-#ifdef TRACE_LOG
-						TRACE_LOG(pChannel->fLogHandle, "I\n");
-#endif
 						pChannel->fHavePrintKeyInfo = true;
 					}
 				}
@@ -239,26 +226,22 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 					iRet = EasyRTMP_SendPacket(pChannel->fPusherInfo.rtmpHandle, &avFrame);
 					if (iRet < 0)
 					{
-						WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to Send H264 Packet(P-frame) ...");
-						//printf("[rtmp][send][failed]Fail to Send H264 Packet(P-frame) ...\n");
-#ifdef TRACE_LOG
-						TRACE_LOG(pChannel->fLogHandle, "[rtmp][send][failed]Fail to Send H264 Packet(P-frame) ...\n");
-#endif
+						if (NULL != pChannel->liveCallback)
+						{
+							pChannel->liveCallback(2, 2, "Fail to Send H264 Packet(P-frame) ...");
+						}
 					}
 					else
 					{
 						if(!pChannel->fHavePrintKeyInfo)
 						{
-#ifdef TRACE_LOG
-							TRACE_LOG(pChannel->fLogHandle, "P\n");
-#endif
 						}
 					}
 				}
 			}				
 		}	
 	}
-	//audio frame
+	//音频帧
 	if (_mediatype == EASY_SDK_AUDIO_FRAME_FLAG)
 	{
 		/* 音频编码 */
@@ -314,8 +297,7 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 				}
 				unsigned int out_len = 0;
 				//aac encode
-				int nRet = Easy_AACEncoder_Encode(pChannel->fPusherInfo.aacEncHandle, 
-					(unsigned char*)pbuf, frameinfo->length, (unsigned char*)pChannel->fPusherInfo.pAACCacheBuffer, &out_len) ;
+				int nRet = Easy_AACEncoder_Encode(pChannel->fPusherInfo.aacEncHandle, (unsigned char*)pbuf, frameinfo->length, (unsigned char*)pChannel->fPusherInfo.pAACCacheBuffer, &out_len) ;
 				if (nRet>0&&out_len>0)
 				{
 					pSendBuffer = (unsigned char*)pChannel->fPusherInfo.pAACCacheBuffer ;
@@ -325,7 +307,7 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 			}
 		}
 
-		if(pChannel->fPusherInfo.rtmpHandle&&pSendBuffer&&nSendBufferLen>0)
+		if(pChannel->fPusherInfo.rtmpHandle && pSendBuffer && nSendBufferLen > 0)
 		{
 			EASY_AV_Frame avFrame;
 			memset(&avFrame, 0, sizeof(EASY_AV_Frame));
@@ -337,25 +319,20 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 			iRet = EasyRTMP_SendPacket(pChannel->fPusherInfo.rtmpHandle, &avFrame);
 			if (iRet < 0)
 			{
-				WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "2", "Fail to Send AAC Packet ...");
-				//printf("[aac][send][failed]Fail to Send AAC Packet ...\n");
-#ifdef TRACE_LOG
-				TRACE_LOG(pChannel->fLogHandle, "[aac][send][failed]Fail to Send AAC Packet ...\n");
-#endif
+				if (NULL != pChannel->liveCallback)
+				{
+					pChannel->liveCallback(2, 2, "Fail to Send AAC Packet ...");
+				}
 			}
 			else
 			{
 				if(!pChannel->fHavePrintKeyInfo)
 				{
-#ifdef TRACE_LOG
-					TRACE_LOG(pChannel->fLogHandle, "Audio\n");
-#endif
 				}
 			}
 		}
 	}
-
-	// media info frame
+	//媒体帧
 	if (_mediatype == EASY_SDK_MEDIA_INFO_FLAG)
 	{
 		if(pbuf != NULL)
@@ -363,40 +340,47 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 			EASY_MEDIA_INFO_T mediainfo;
 			memset(&(pChannel->fMediainfo), 0x00, sizeof(EASY_MEDIA_INFO_T));
 			memcpy(&(pChannel->fMediainfo), pbuf, sizeof(EASY_MEDIA_INFO_T));
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle,"RTSP DESCRIBE Get Media Info: video:%u fps:%u audio:%u channel:%u sampleRate:%u \n", 
-				pChannel->fMediainfo.u32VideoCodec, pChannel->fMediainfo.u32VideoFps, pChannel->fMediainfo.u32AudioCodec, pChannel->fMediainfo.u32AudioChannel, pChannel->fMediainfo.u32AudioSamplerate);
-#endif
+
+			if (NULL != pChannel->liveCallback)
+			{
+				char desc[255];
+
+				sprintf(desc, "RTSP DESCRIBE Get Media Info: video:%u fps:%u audio:%u channel:%u sampleRate:%u", pChannel->fMediainfo.u32VideoCodec, pChannel->fMediainfo.u32VideoFps, pChannel->fMediainfo.u32AudioCodec, pChannel->fMediainfo.u32AudioChannel, pChannel->fMediainfo.u32AudioSamplerate);
+				
+				pChannel->liveCallback(1, 1, desc);
+			}
 		}
 	}
-
-	//event frame
+	//事件帧
 	if (_mediatype == EASY_SDK_EVENT_FRAME_FLAG)
 	{
 		if (NULL == pbuf && NULL == frameinfo)
 		{
-			WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "0", "connecting");
-			//printf("[rtsp][connect][connecting]:%s ...\n", pChannel->fCfgInfo.srcRtspAddr);
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtsp][connect][connecting]:%s ...\n", pChannel->fCfgInfo.srcRtspAddr);
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(1, 0, "connecting");
+			}
 		}
 		else if (NULL != frameinfo && frameinfo->codec == EASY_SDK_EVENT_CODEC_ERROR)
 		{
 			int errorCode = EasyRTSP_GetErrCode(pChannel->fNVSHandle);
 			sprintf(msg, "error:%s, %d :%s", pChannel->fCfgInfo.srcRtspAddr, errorCode, pbuf ? pbuf : "null");
-			WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "2", msg);
-			//printf("[rtsp][connect][error]:%s, %d :%s ...\n", pChannel->fCfgInfo.srcRtspAddr, errorCode, pbuf ? pbuf : "null");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "[rtsp][connect][error]:%s, %d :%s ...\n", pChannel->fCfgInfo.srcRtspAddr, errorCode, pbuf ? pbuf : "null");
-#endif
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(1, 2, msg);
+			}
 		}
 		else if (NULL != frameinfo && frameinfo->codec == EASY_SDK_EVENT_CODEC_EXIT)
 		{
 			int errorCode = EasyRTSP_GetErrCode(pChannel->fNVSHandle);
 			sprintf(msg, "exit:%s,Error:%d", pChannel->fCfgInfo.srcRtspAddr, errorCode);
-			WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "2", msg);
-			//printf("[rtsp][connect][exit]:%s,Error:%d ...\n", pChannel->fCfgInfo.srcRtspAddr, errorCode);
+			if (NULL != pChannel->liveCallback)
+			{
+				pChannel->liveCallback(1, 2, msg);
+			}
+			//restart
+			StopChannelRtsp(pChannel);
+			StartChannelRtsp(pChannel, __RTSPSourceCallBack);
 		}
 		/*
 		else if (NULL != frameinfo && frameinfo->codec == 0x7265636F)
@@ -409,6 +393,190 @@ int Easy_APICALL __RTSPSourceCallBack( int _chid, void *_chPtr, int _mediatype, 
 	return 0;
 }
 
+//启动通道
+#ifdef _WIN32
+extern "C" __declspec(dllexport)
+#endif
+#ifndef _WIN32
+extern "C"
+{
+#endif
+bool StartChannel(int channelId, char *rtsp, char *rtmp, int option, int verbosity, LiveCallBack liveCallback)
+{
+	//RTMP Activate
+	if (!rtmpActivate)
+	{
+		int ret = EasyRTMP_Activate(RTMP_KEY);
+		switch (ret)
+		{
+		case EASY_ACTIVATE_INVALID_KEY:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 2, "KEY is EASY_ACTIVATE_INVALID_KEY!");
+			}
+			break;
+		case EASY_ACTIVATE_TIME_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 2, "KEY is EASY_ACTIVATE_TIME_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_PROCESS_NAME_LEN_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 2, "KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_PROCESS_NAME_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 2, "KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_VALIDITY_PERIOD_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 2, "KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_SUCCESS:
+			if (NULL != liveCallback)
+			{
+				liveCallback(2, 0, "KEY is EASY_ACTIVATE_SUCCESS!");
+			}
+			break;
+		default:
+			if (ret <= 0)
+			{
+				if (NULL != liveCallback)
+				{
+					liveCallback(2, 2, "RTMP Activate error.");
+				}
+			}
+			else
+			{
+				if (NULL != liveCallback)
+				{
+					liveCallback(2, 0, "RTMP Activate Success!");
+				}
+			}
+			break;
+		}
+		if (ret <= 0)
+		{
+			getchar();
+			return false;
+		}
+		rtmpActivate = true;
+	}
+
+	//RTSP Activate
+	if (!rtspActivate)
+	{
+		int ret = EasyRTSP_Activate(RTSP_KEY);
+		switch (ret)
+		{
+		case EASY_ACTIVATE_INVALID_KEY:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "KEY is EASY_ACTIVATE_INVALID_KEY!");
+			}
+			break;
+		case EASY_ACTIVATE_TIME_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "KEY is EASY_ACTIVATE_TIME_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_PROCESS_NAME_LEN_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_PROCESS_NAME_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_VALIDITY_PERIOD_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_PLATFORM_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "EASY_ACTIVATE_PLATFORM_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_COMPANY_ID_LEN_ERR:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 2, "EASY_ACTIVATE_COMPANY_ID_LEN_ERR!");
+			}
+			break;
+		case EASY_ACTIVATE_SUCCESS:
+			if (NULL != liveCallback)
+			{
+				liveCallback(1, 0, "KEY is EASY_ACTIVATE_SUCCESS!");
+			}
+			break;
+		default:
+			if (ret <= 0)
+			{
+				if (NULL != liveCallback)
+				{
+					liveCallback(1, 2, "RTSP Activate error.");
+				}
+			}
+			else
+			{
+				if (NULL != liveCallback)
+				{
+					liveCallback(1, 0, "RTSP Activate Success!");
+				}
+			}
+			break;
+		}
+		if (ret <= 0)
+		{
+			getchar();
+			return false;
+		}
+		rtspActivate = true;
+	}
+
+	_channel_info* pChannelInfo = CreateChannel(channelId, rtsp, rtmp, option, verbosity);
+	if (NULL == pChannelInfo)
+	{
+		return false;
+	}
+	//rtsp init
+	EasyRTSP_Init(&(pChannelInfo->fNVSHandle));
+	if (NULL == pChannelInfo->fNVSHandle)
+	{
+		return false;
+	}
+
+	pChannelInfo->liveCallback = liveCallback;
+
+	if (!StartChannelRtsp(pChannelInfo, __RTSPSourceCallBack))
+	{
+		return false;
+	}
+
+	//add to channel list
+	gChannelInfoList.push_back(pChannelInfo);
+
+	return true;
+}
+#ifndef _WIN32
+}
+#endif
+
 //release
 void ReleaseSpace(void)
 {
@@ -417,43 +585,7 @@ void ReleaseSpace(void)
 	{
 		_channel_info* pChannel = *it;
 
-		if (NULL != pChannel->fNVSHandle) 
-		{
-			//rtsp close
-			EasyRTSP_CloseStream(pChannel->fNVSHandle);
-			//rtsp deinit
-			EasyRTSP_Deinit(&(pChannel->fNVSHandle));
-			pChannel->fNVSHandle = NULL;
-		}
-
-		if (NULL != pChannel->fPusherInfo.rtmpHandle)
-		{
-			//rtmp release
-			EasyRTMP_Release(pChannel->fPusherInfo.rtmpHandle);
-			pChannel->fPusherInfo.rtmpHandle = NULL;
-		}
-
-		if(pChannel->fLogHandle)
-		{
-			//log close
-			TRACE_CloseLogFile(pChannel->fLogHandle);
-			pChannel->fLogHandle = NULL;
-		}
-		if (pChannel->fPusherInfo.aacEncHandle )
-		{
-			//aac release
-			Easy_AACEncoder_Release(pChannel->fPusherInfo.aacEncHandle );
-			pChannel->fPusherInfo.aacEncHandle  = NULL;
-		}
-		if (pChannel->fPusherInfo.pAACCacheBuffer )
-		{
-			delete[] pChannel->fPusherInfo.pAACCacheBuffer;
-			pChannel->fPusherInfo.pAACCacheBuffer = NULL;
-		}
-
-		//connect
-		WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "0", "");
-		WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "0", "");
+		StopChannel(pChannel);
 
 		delete pChannel;
 	}
@@ -477,24 +609,8 @@ bool InitCfgInfo(int argc, char * argv[])
 	{
 		int i = 0;
 		gChannelInfoList.clear();
-		_channel_info* pChannelInfo = new _channel_info();
-		if (pChannelInfo)
-		{
-			memset(pChannelInfo, 0, sizeof(_channel_info));
-			pChannelInfo->fCfgInfo.channelId = i;
-			pChannelInfo->fHavePrintKeyInfo = false;
-			sprintf(pChannelInfo->fCfgInfo.channelName, "channel%d", i);
-			//strcpy(pChannelInfo->fCfgInfo.srcRtspAddr, GetIniKeyString(pChannelInfo->fCfgInfo.channelName, "rtsp", CONF_FILE_PATH));
-			strcpy(pChannelInfo->fCfgInfo.srcRtspAddr, argv[1]);
-			//strcpy(pChannelInfo->fCfgInfo.destRtmpAddr, GetIniKeyString(pChannelInfo->fCfgInfo.channelName, "rtmp", CONF_FILE_PATH));
-			strcpy(pChannelInfo->fCfgInfo.destRtmpAddr, argv[2]);
-			//pChannelInfo->fCfgInfo.option = GetIniKeyInt(pChannelInfo->fCfgInfo.channelName, "option", CONF_FILE_PATH);
-			pChannelInfo->fCfgInfo.option = argc > 3 ? atoi(argv[3]) : 0;
-			if (strlen(pChannelInfo->fCfgInfo.srcRtspAddr) > 0 && strlen(pChannelInfo->fCfgInfo.destRtmpAddr) > 0)
-			{
-				gChannelInfoList.push_back(pChannelInfo);
-			}
-		}
+
+		StartChannel(i, argv[1], argv[2], (argc > 3 ? atoi(argv[3]) : 0), 1, NULL);
 	}
 	else
 	{
@@ -502,21 +618,16 @@ bool InitCfgInfo(int argc, char * argv[])
 		gChannelInfoList.clear();
 		for (i = 0; i < maxChannelIndex; i++)
 		{
-			_channel_info* pChannelInfo = new _channel_info();
-			if (pChannelInfo)
-			{
-				memset(pChannelInfo, 0, sizeof(_channel_info));
-				pChannelInfo->fCfgInfo.channelId = i;
-				pChannelInfo->fHavePrintKeyInfo = false;
-				sprintf(pChannelInfo->fCfgInfo.channelName, "channel%d", i);
-				strcpy(pChannelInfo->fCfgInfo.srcRtspAddr, GetIniKeyString(pChannelInfo->fCfgInfo.channelName, CONF_KEY_RTSP, CONF_FILE_PATH));
-				strcpy(pChannelInfo->fCfgInfo.destRtmpAddr, GetIniKeyString(pChannelInfo->fCfgInfo.channelName, CONF_KEY_RTMP, CONF_FILE_PATH));
-				pChannelInfo->fCfgInfo.option = GetIniKeyInt(pChannelInfo->fCfgInfo.channelName, "option", CONF_FILE_PATH);
-				if (strlen(pChannelInfo->fCfgInfo.srcRtspAddr) > 0 && strlen(pChannelInfo->fCfgInfo.destRtmpAddr) > 0)
-				{
-					gChannelInfoList.push_back(pChannelInfo);
-				}
-			}
+			char channelName[255];
+
+			sprintf(channelName, "channel%d", i);
+
+			StartChannel(i, 
+				GetIniKeyString(channelName, CONF_KEY_RTSP, CONF_FILE_PATH),
+				GetIniKeyString(channelName, CONF_KEY_RTMP, CONF_FILE_PATH),
+				GetIniKeyInt(channelName, "option", CONF_FILE_PATH),
+				1,
+				NULL);
 		}
 	}
 	return true;
@@ -527,6 +638,8 @@ int main(int argc, char * argv[])
 {
 	printf("EasyRTSPLive v2.0.19.0826(Free)\n");
 
+	__time64_t tt = _time64(0i64);
+
 	//splash
 #ifdef _WIN32
 		Sleep(3000);
@@ -534,56 +647,7 @@ int main(int argc, char * argv[])
 		sleep(3);
 #endif
 
-	//config
-	InitCfgInfo(argc, argv);
-
-	//RTMP Activate
-	int iret = 0;
-	iret = EasyRTMP_Activate(RTMP_KEY);
-	switch (iret)
-	{
-		case EASY_ACTIVATE_INVALID_KEY:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_INVALID_KEY!");
-			printf("[rtmp][activate][failed]KEY is EASY_ACTIVATE_INVALID_KEY!\n");
-			break;
-		case EASY_ACTIVATE_TIME_ERR:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_TIME_ERR!");
-			printf("[rtmp][activate][failed]KEY is EASY_ACTIVATE_TIME_ERR!\n");
-			break;
-		case EASY_ACTIVATE_PROCESS_NAME_LEN_ERR:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!");
-			printf("[rtmp][activate][failed]KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!\n");
-			break;
-		case EASY_ACTIVATE_PROCESS_NAME_ERR:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!");
-			printf("[rtmp][activate][failed]KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!\n");
-			break;
-		case EASY_ACTIVATE_VALIDITY_PERIOD_ERR:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!");
-			printf("[rtmp][activate][failed]KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!\n");
-			break;
-		case EASY_ACTIVATE_SUCCESS:
-			WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "1", "KEY is EASY_ACTIVATE_SUCCESS!");
-			printf("[rtmp][activate][sucess]KEY is EASY_ACTIVATE_SUCCESS!\n");
-			break;
-		default:
-			if (iret <= 0)
-			{
-				WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "2", "RTMP Activate error.");
-				printf("[rtmp][activate][failed]RTMP Activate error. ret=%d!!!\n", iret);
-			}
-			else
-			{
-				WriteChannelRtmpConnect(CONF_SECTION_CHANNEL, "1", "RTMP Activate Success!");
-				printf("[rtmp][activate][sucess]RTMP Activate Success!\n");
-			}
-			break;
-	}
-	if (iret <= 0)
-	{
-		getchar();
-		return -1;
-	}
+	
 
 #ifdef _WIN32
 	extern char* optarg;
@@ -592,106 +656,10 @@ int main(int argc, char * argv[])
 
 	atexit(ReleaseSpace);
 
-	//RTSP Activate
-	iret = 0;
-	iret = EasyRTSP_Activate(RTSP_KEY);
-	switch (iret)
-	{
-		case EASY_ACTIVATE_INVALID_KEY:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_INVALID_KEY!");
-			printf("[rtsp][activate][failed]KEY is EASY_ACTIVATE_INVALID_KEY!\n");
-			break;
-		case EASY_ACTIVATE_TIME_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_TIME_ERR!");
-			printf("[rtsp][activate][failed]KEY is EASY_ACTIVATE_TIME_ERR!\n");
-			break;
-		case EASY_ACTIVATE_PROCESS_NAME_LEN_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!");
-			printf("[rtsp][activate][failed]KEY is EASY_ACTIVATE_PROCESS_NAME_LEN_ERR!\n");
-			break;
-		case EASY_ACTIVATE_PROCESS_NAME_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!");
-			printf("[rtsp][activate][failed]KEY is EASY_ACTIVATE_PROCESS_NAME_ERR!\n");
-			break;
-		case EASY_ACTIVATE_VALIDITY_PERIOD_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!");
-			printf("[rtsp][activate][failed]KEY is EASY_ACTIVATE_VALIDITY_PERIOD_ERR!\n");
-			break;
-		case EASY_ACTIVATE_PLATFORM_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "EASY_ACTIVATE_PLATFORM_ERR!");
-			printf("[rtsp][activate][failed]EASY_ACTIVATE_PLATFORM_ERR!\n");
-			break;
-		case EASY_ACTIVATE_COMPANY_ID_LEN_ERR:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "EASY_ACTIVATE_COMPANY_ID_LEN_ERR!");
-			printf("[rtsp][activate][failed]EASY_ACTIVATE_COMPANY_ID_LEN_ERR!\n");
-			break;
-		case EASY_ACTIVATE_SUCCESS:
-			WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "1", "KEY is EASY_ACTIVATE_SUCCESS!");
-			printf("[rtsp][activate][success]KEY is EASY_ACTIVATE_SUCCESS!\n");
-			break;
-		default:
-			if (iret <= 0)
-			{
-				WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "2", "RTSP Activate error.");
-				printf("[rtsp][activate][failed]RTSP Activate error. ret=%d!!!\n", iret);
-			}
-			else
-			{
-				WriteChannelRtspConnect(CONF_SECTION_CHANNEL, "1", "RTSP Activate Success!");
-				printf("[rtsp][activate][success]RTSP Activate Success!\n");
-			}
-			break;
-	}
-	if(iret <= 0)
-	{
-		getchar();
-		return -2;
-	}
-
-	std::list<_channel_info*>::iterator it;
-
-	//rtsp channel list connect
-	for(it = gChannelInfoList.begin(); it != gChannelInfoList.end(); it++)
-	{
-		_channel_info* pChannel = *it;
-
-#ifdef TRACE_LOG
-		//log handle
-		pChannel->fLogHandle = TRACE_OpenLogFile(pChannel->fCfgInfo.channelName);
-#endif
-
-#ifdef TRACE_LOG
-		TRACE_LOG(pChannel->fLogHandle, "channel[%d] rtsp addr : %s\n", pChannel->fCfgInfo.channelId, pChannel->fCfgInfo.srcRtspAddr);
-		TRACE_LOG(pChannel->fLogHandle, "channel[%d] rtmp addr : %s\n", pChannel->fCfgInfo.channelId, pChannel->fCfgInfo.destRtmpAddr);
-#endif
-		//rtsp init
-		EasyRTSP_Init(&(pChannel->fNVSHandle));
-
-		if (NULL == pChannel->fNVSHandle)
-		{
-			WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "2", "rtsp init error.");
-#ifdef TRACE_LOG
-			TRACE_LOG(pChannel->fLogHandle, "%s rtsp init error. ret=%d!!!\n", pChannel->fCfgInfo.channelName , iret);
-#endif
-			continue;
-		}
-
-		unsigned int mediaType = EASY_SDK_VIDEO_FRAME_FLAG | EASY_SDK_AUDIO_FRAME_FLAG;
-		
-		//rtsp callback
-		EasyRTSP_SetCallback(pChannel->fNVSHandle, __RTSPSourceCallBack);
-
-		//rtsp log level
-		int verbosity = GetIniKeyInt(CONF_SECTION_CHANNEL, "verbosity", CONF_FILE_PATH);
-		printf("%s:%d\n", CONF_KEY_VERBOSITY, verbosity);
-
-		//rtsp open
-		EasyRTSP_OpenStream(pChannel->fNVSHandle, pChannel->fCfgInfo.channelId, pChannel->fCfgInfo.srcRtspAddr, EASY_RTP_OVER_TCP, mediaType, 0, 0, pChannel, 1000, 0, pChannel->fCfgInfo.option, verbosity);
 	
-		//connect
-		WriteChannelRtspConnect(pChannel->fCfgInfo.channelName, "0", "");
-		WriteChannelRtmpConnect(pChannel->fCfgInfo.channelName, "0", "");
-	}
+
+	//config
+	InitCfgInfo(argc, argv);
 
 	char str[4] = { 0 };
 
